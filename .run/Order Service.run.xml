@@ -1,0 +1,16 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Order Service" type="Application" factoryName="Application">
+    <option name="MAIN_CLASS_NAME" value="com.movieselect.order.OrderApplication" />
+    <module name="order-service" />
+    <option name="VM_PARAMETERS" value="-Dspring.profiles.active=supabase" />
+    <envs>
+      <env name="SUPABASE_DB_HOST" value="aws-1-us-west-2.pooler.supabase.com" />
+      <env name="SUPABASE_DB_NAME" value="postgres" />
+      <env name="SUPABASE_DB_PORT" value="5432" />
+      <env name="SUPABASE_DB_USERNAME" value="postgres.fjbsuipvhmefaksahhdv" />
+    </envs>
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
