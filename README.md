@@ -28,12 +28,13 @@ Check service health in a browser or Postman (no bearer token required):
 
 Each returns a JSON status such as `{ "status": "UP" }` when healthy.
 
-## Use Supabase PostgreSQL
+## Environments and Supabase PostgreSQL
 
-Use the Supabase **Session pooler** connection details from **Connect**. The
-IntelliJ run configurations contain the host `aws-1-us-west-2.pooler.supabase.com`,
-port `5432`, database `postgres`, and username
-`postgres.fjbsuipvhmefaksahhdv`.
+All services provide Spring profiles named `dev`, `test`, and `prod`. Select a
+profile with `SPRING_PROFILES_ACTIVE` or
+`-Dspring-boot.run.profiles=<profile>`. The checked-in IntelliJ run
+configurations use `dev`. Use the Supabase **Session pooler** connection
+details from each environment's **Connect** page.
 
 The backend connects to Supabase PostgreSQL; it does not include an H2/local
 database mode or automatically insert demo movies. Add movies through the
@@ -42,7 +43,7 @@ variables in the terminal before launching the services, or configure them in
 each IntelliJ run configuration under **Environment variables**:
 
 ```sh
-export SPRING_PROFILES_ACTIVE=supabase
+export SPRING_PROFILES_ACTIVE=dev
 export SUPABASE_DB_HOST="aws-1-us-west-2.pooler.supabase.com"
 export SUPABASE_DB_PORT=5432
 export SUPABASE_DB_NAME=postgres
@@ -55,35 +56,82 @@ Set `SUPABASE_DB_PASSWORD` to the database password from Supabase. Generate the
 JWT signing key once and use that exact same value for all three services. Do
 not commit the database password or signing key.
 
-Use the same database credentials and `JWT_SECRET_BASE64` for all services.
-Each service applies its Flyway migrations to its own schema (`auth_service`,
-`movie_service`, or `order_service`) in the shared Supabase PostgreSQL database.
+Use the same database credentials and `JWT_SECRET_BASE64` for all three
+services within one environment. Dev uses the existing schemas (`auth_service`,
+`movie_service`, `order_service`) to preserve current data. Test uses separate
+`*_test` schemas. Use separate Supabase projects for test and production, with
+environment-specific credentials, to prevent data from overlapping.
+
+The `test` profile requires `TEST_SUPABASE_DB_HOST`,
+`TEST_SUPABASE_DB_USERNAME`, `TEST_SUPABASE_DB_PASSWORD`, and
+`TEST_JWT_SECRET_BASE64`. It optionally accepts `TEST_SUPABASE_DB_PORT`,
+`TEST_SUPABASE_DB_NAME`, `TEST_DB_POOL_MAX_SIZE`,
+`TEST_CORS_ALLOWED_ORIGINS`, and test-specific admin, movie-service, and Stripe
+settings. Point these only at a dedicated test Supabase project.
+
+The `prod` profile requires `PROD_SUPABASE_DB_HOST`,
+`PROD_SUPABASE_DB_USERNAME`, `PROD_SUPABASE_DB_PASSWORD`,
+`PROD_JWT_SECRET_BASE64`, and `PROD_CORS_ALLOWED_ORIGINS`. It optionally accepts
+`PROD_SUPABASE_DB_PORT`, `PROD_SUPABASE_DB_NAME`, `PROD_DB_POOL_MAX_SIZE`,
+`PROD_ADMIN_EMAIL`, `PROD_ADMIN_PASSWORD`, `PROD_MOVIE_SERVICE_HOST`, and
+production Stripe settings. Store production secrets in your deployment
+platform's secret manager, never in source control.
+
 Each service limits its JDBC pool to two connections by default so Flyway can
-use its migration and lock connections while the three services stay within
-Supabase's session pooler limit. Stop
-duplicate service runs and disconnect unused database clients if Supabase still
-reports that the pool is full. You can override the per-service pool limit with
-`DB_POOL_MAX_SIZE` if your Supabase plan and other clients leave sufficient
-connections available.
-Start each service with the Supabase profile:
+use migration and lock connections while keeping total usage low. Override the
+pool per profile with `DB_POOL_MAX_SIZE`, `TEST_DB_POOL_MAX_SIZE`, or
+`PROD_DB_POOL_MAX_SIZE`. Stop duplicate service runs and disconnect unused
+database clients if Supabase reports that the pool is full.
+
+Run services with the `dev` profile:
 
 ```sh
-mvn -pl auth-service spring-boot:run -Dspring-boot.run.profiles=supabase
-mvn -pl movie-service spring-boot:run -Dspring-boot.run.profiles=supabase
-mvn -pl order-service spring-boot:run -Dspring-boot.run.profiles=supabase
+mvn -pl auth-service spring-boot:run -Dspring-boot.run.profiles=dev
+mvn -pl movie-service spring-boot:run -Dspring-boot.run.profiles=dev
+mvn -pl order-service spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
 This connects the Spring services directly to Supabase PostgreSQL;
 authentication remains the app's Spring JWT authentication and does not use
 Supabase Auth.
 
-Set a private signing key and, optionally, the first admin credentials:
+For `test` and `prod`, set the environment-specific variables above and select
+the corresponding profile. For example:
 
 ```sh
-export JWT_SECRET_BASE64="$(openssl rand -base64 32)"
-export ADMIN_EMAIL="admin@example.com"
-export ADMIN_PASSWORD="use-a-unique-password-of-at-least-12-chars"
+mvn -pl auth-service spring-boot:run -Dspring-boot.run.profiles=test
+mvn -pl movie-service spring-boot:run -Dspring-boot.run.profiles=prod
 ```
+
+Generate a separate private JWT signing key per environment with
+`openssl rand -base64 32`; share it only among the three services in that
+environment. Configure admin credentials separately per environment.
+
+## Deploy to Render
+
+The repository includes a Render Blueprint (`render.yaml`) and a root
+multi-stage `Dockerfile`. In Render, choose **New → Blueprint**, connect this
+GitHub repository, and deploy the blueprint. It creates the Auth, Movies, and
+Orders web services, builds the Java 21 application, and uses
+`/actuator/health` for health checks. Each service listens on Render's `PORT`.
+
+During setup, Render asks for the shared production environment-group values:
+`PROD_SUPABASE_DB_HOST`, `PROD_SUPABASE_DB_USERNAME`,
+`PROD_SUPABASE_DB_PASSWORD`, `PROD_JWT_SECRET_BASE64`, and
+`PROD_CORS_ALLOWED_ORIGINS`. Use your production Supabase session-pooler
+details, a strong new JWT secret, and the public origin(s) of your frontend.
+The same JWT secret is shared by the three services. The Orders service gets
+the Movies service hostname from Render automatically. Auth also accepts
+`PROD_ADMIN_EMAIL` and `PROD_ADMIN_PASSWORD`; Orders accepts
+`PROD_STRIPE_SECRET_KEY` and `PROD_STRIPE_WEBHOOK_SECRET` if payments are
+enabled. Enter secret values in Render's environment settings, not in this
+file. The Blueprint defaults to Render's free plan; choose a paid plan in
+Render if you need always-on services.
+
+Before deploying, ensure the production Supabase project is separate from dev
+and test. The first deployment applies Flyway migrations to the production
+schemas, so verify the selected database and keep a backup. After deployment,
+copy each service's Render URL and test its `/actuator/health` endpoint.
 
 For Stripe payments, also set `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`.
 Set `STRIPE_SUCCESS_URL` and `STRIPE_CANCEL_URL` to your frontend routes as
@@ -94,13 +142,13 @@ needed; Stripe keys must remain server-side. In local development, forward
 Set `CORS_ALLOWED_ORIGINS` to a comma-separated list of trusted frontend origins
 when the app is not served from `http://localhost:5173`.
 
-Start the services in separate terminals (the `supabase` profile is also
-selected by the checked-in IntelliJ run configurations):
+Start the services in separate terminals (the `dev` profile is selected by the
+checked-in IntelliJ run configurations):
 
 ```sh
-mvn -pl auth-service spring-boot:run -Dspring-boot.run.profiles=supabase
-mvn -pl movie-service spring-boot:run -Dspring-boot.run.profiles=supabase
-mvn -pl order-service spring-boot:run -Dspring-boot.run.profiles=supabase
+mvn -pl auth-service spring-boot:run -Dspring-boot.run.profiles=dev
+mvn -pl movie-service spring-boot:run -Dspring-boot.run.profiles=dev
+mvn -pl order-service spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
 The admin account is created when both admin environment variables are

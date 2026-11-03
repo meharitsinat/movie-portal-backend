@@ -1,0 +1,72 @@
+envVarGroups:
+  - name: movie-portal-prod
+    envVars:
+      - key: PROD_SUPABASE_DB_HOST
+        sync: false
+      - key: PROD_SUPABASE_DB_PORT
+        value: "5432"
+      - key: PROD_SUPABASE_DB_NAME
+        value: postgres
+      - key: PROD_SUPABASE_DB_USERNAME
+        sync: false
+      - key: PROD_SUPABASE_DB_PASSWORD
+        sync: false
+      - key: PROD_JWT_SECRET_BASE64
+        sync: false
+      - key: PROD_CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: PROD_DB_POOL_MAX_SIZE
+        value: "2"
+
+services:
+  - type: web
+    name: movie-portal-auth
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: java -jar /app/auth-service.jar
+    healthCheckPath: /actuator/health
+    envVars:
+      - fromGroup: movie-portal-prod
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+      - key: PROD_ADMIN_EMAIL
+        sync: false
+      - key: PROD_ADMIN_PASSWORD
+        sync: false
+
+  - type: web
+    name: movie-portal-movies
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: java -jar /app/movie-service.jar
+    healthCheckPath: /actuator/health
+    envVars:
+      - fromGroup: movie-portal-prod
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+
+  - type: web
+    name: movie-portal-orders
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: java -jar /app/order-service.jar
+    healthCheckPath: /actuator/health
+    envVars:
+      - fromGroup: movie-portal-prod
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+      - key: PROD_MOVIE_SERVICE_HOST
+        fromService:
+          type: web
+          name: movie-portal-movies
+          property: host
+      - key: PROD_STRIPE_SECRET_KEY
+        sync: false
+      - key: PROD_STRIPE_WEBHOOK_SECRET
+        sync: false
